@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>HabitPro Max</title>
+    
+    <!-- PWA tagy -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="HabitPro">
+    
+    <!-- Spolehlivé načtení Chart.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+
+    <style>
+        /* ====== ZÁKLADNÍ PROMĚNNÉ A VZHLED ====== */
+        :root {
+            --bg-color: #030305; 
+            --glass-bg: rgba(255, 255, 255, 0.04); 
+            --glass-bg-active: rgba(255, 255, 255, 0.08);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --text-main: #ffffff;
+            --text-dim: #9ca3af;
+            --accent: #0a84ff;
+            --danger: #ff453a;
+            --success: #32d74b;
+            
+            /* Heatmapa (Fialové odstíny z tvého obrázku) */
+            --hm-0: rgba(255, 255, 255, 0.05);
+            --hm-1: #4a3485; 
+            --hm-2: #6545b7;
+            --hm-3: #8a64ed;
+            --hm-4: #b392ff; 
+            
+            /* Výřezy pro iPhone Notch / Spodní lištu */
+            --safe-bottom: env(safe-area-inset-bottom, 20px);
+            --safe-top: env(safe-area-inset-top, 47px);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; user-select: none; }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: radial-gradient(circle at 10% 20%, rgba(10, 132, 255, 0.06), transparent 30%),
+                              radial-gradient(circle at 90% 80%, rgba(138, 100, 237, 0.06), transparent 30%);
+            color: var(--text-main);
+            height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+        }
+
+        .glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        /* ====== HLAVIČKA A OBSAH ====== */
+        header { padding: calc(var(--safe-top) + 10px) 24px 16px; z-index: 10; }
+        header h1 { font-size: 38px; font-weight: 800; letter-spacing: -1px; }
+        header .date { color: var(--text-dim); font-size: 13px; text-transform: uppercase; font-weight: 700; letter-spacing: 1px; margin-bottom: 4px; }
+
+        main { flex: 1; overflow-y: auto; padding: 10px 24px calc(var(--safe-bottom) + 100px); scroll-behavior: smooth; }
+        main::-webkit-scrollbar { display: none; }
+        
+        .view { display: none; animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        .view.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ====== KARTY NÁVYKŮ (DNEŠEK) ====== */
+        .habit-list { display: flex; flex-direction: column; gap: 16px; }
+        .habit-card { 
+            padding: 20px; display: flex; align-items: center; justify-content: space-between; 
+            transition: transform 0.2s, background 0.2s; cursor: pointer; position: relative; overflow: hidden;
+        }
+        .habit-card:active { transform: scale(0.96); background: var(--glass-bg-active); }
+        
+        .habit-info { display: flex; align-items: center; gap: 16px; flex: 1; z-index: 1; }
+        .habit-icon { 
+            width: 56px; height: 56px; border-radius: 18px; display: flex; align-items: center; justify-content: center; 
+            font-size: 28px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05);
+        }
+        .habit-texts h3 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+        .habit-texts p { font-size: 14px; color: var(--text-dim); font-weight: 500; display: flex; align-items: center; gap: 8px;}
+        
+        .streak-badge { background: rgba(255, 159, 10, 0.15); color: #ff9f0a; padding: 3px 8px; border-radius: 8px; font-size: 12px; font-weight: 700; }
+
+        .progress-ring { width: 52px; height: 52px; position: relative; z-index: 1;}
+        .progress-ring svg { transform: rotate(-90deg); width: 100%; height: 100%; filter: drop-shadow(0 0 4px rgba(0,0,0,0.4));}
+        .progress-ring circle { fill: transparent; stroke-width: 4.5; stroke-linecap: round; }
+        .progress-ring .bg { stroke: rgba(255,255,255,0.08); }
+        .progress-ring .fg { transition: stroke-dashoffset 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), stroke 0.3s; }
+        .progress-icon { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 18px; transition: transform 0.4s; }
+
+        /* ====== STATISTIKY & HEATMAPA ====== */
+        .section-title { font-size: 20px; font-weight: 700; margin: 30px 0 16px 0; display: flex; justify-content: space-between; align-items: flex-end;}
+        .section-subtitle { font-size: 13px; color: var(--text-dim); font-weight: 500;}
+        
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 10px; }
+        .stat-card { padding: 24px; text-align: center; }
+        .stat-card h2 { font-size: 36px; font-weight: 800; margin-bottom: 4px; }
+        .stat-card p { font-size: 12px; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 1px;}
+
+        /* Graf */
+        .chart-wrapper { padding: 20px; height: 260px; width: 100%; position: relative; }
+
+        /* Heatmapa - Finální profi mřížka */
+        .heatmap-wrapper { padding: 24px 20px; overflow-x: auto; scrollbar-width: none; }
+        .heatmap-wrapper::-webkit-scrollbar { display: none; }
+        .heatmap-scroll { display: flex; gap: 8px; }
+        
+        .hm-days { display: grid; grid-template-rows: repeat(7, 14px); gap: 4px; margin-top: 20px; margin-right: 4px; }
+        .hm-days span { font-size: 10px; color: var(--text-dim); line-height: 14px; }
+        
+        .hm-core { display: flex; flex-direction: column; gap: 6px; }
+        .hm-months { display: flex; position: relative; height: 14px; }
+        .hm-months span { font-size: 11px; color: var(--text-dim); position: absolute; }
+        
+        .hm-grid { display: grid; grid-template-rows: repeat(7, 14px); grid-auto-flow: column; gap: 4px; }
+        .hm-cell { width: 14px; height: 14px; border-radius: 3px; background: var(--hm-0); transition: 0.2s; }
+        .hm-cell.l1 { background: var(--hm-1); }
+        .hm-cell.l2 { background: var(--hm-2); }
+        .hm-cell.l3 { background: var(--hm-3); }
+        .hm-cell.l4 { background: var(--hm-4); box-shadow: 0 0 6px rgba(179, 146, 255, 0.4); }
+        .hm-cell:hover { transform: scale(1.3); border: 1px solid #fff; z-index: 10; }
+        
+        .heatmap-legend { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 16px; font-size: 11px; color: var(--text-dim); }
+        .legend-c { width: 12px; height: 12px; border-radius: 3px; }
+
+        /* ====== NASTAVENÍ A TLAČÍTKA ====== */
+        .settings-btn { 
+            width: 100%; padding: 18px 20px; display: flex; justify-content: space-between; align-items: center; 
+            font-size: 16px; font-weight: 500; color: var(--text-main); border: none; cursor: pointer; margin-bottom: 1px;
+            background: transparent; transition: background 0.2s;
+        }
+        .settings-btn:active { background: rgba(255,255,255,0.05); }
+        .set-icon { width: 32px; height: 32px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-right: 14px; background: rgba(255,255,255,0.1);}
+        
+        /* ====== DOLNÍ NAVIGACE ====== */
+        nav { 
+            position: fixed; bottom: 0; width: 100%; height: calc(70px + var(--safe-bottom)); 
+            background: rgba(10, 10, 12, 0.85); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); 
+            border-top: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-around; padding-bottom: var(--safe-bottom); z-index: 100; 
+        }
+        .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-dim); font-size: 11px; font-weight: 600; cursor: pointer; transition: 0.3s; }
+        .nav-item.active { color: var(--accent); }
+        .nav-item svg { width: 26px; height: 26px; margin-bottom: 4px; fill: currentColor; transition: transform 0.3s;}
+        .nav-item.active svg { transform: translateY(-2px) scale(1.1); }
+
+        /* ====== BOTTOM SHEET (MODAL PRO PŘIDÁNÍ) ====== */
+        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); opacity: 0; pointer-events: none; transition: 0.3s; z-index: 999; }
+        .overlay.active { opacity: 1; pointer-events: auto; }
+        
+        .bottom-sheet { 
+            position: fixed; bottom: -100%; left: 0; width: 100%; 
+            background: rgba(20, 20, 22, 0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border-radius: 32px 32px 0 0; border-top: 1px solid rgba(255,255,255,0.1); padding: 24px 24px calc(var(--safe-bottom) + 24px); 
+            transition: bottom 0.4s cubic-bezier(0.32, 0.72, 0, 1); z-index: 1000; box-shadow: 0 -10px 40px rgba(0,0,0,0.5); 
+        }
+        .bottom-sheet.active { bottom: 0; }
+        
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 8px; font-weight: 700; text-transform: uppercase; }
+        .input-row { display: flex; gap: 12px; }
+        .input-box { width: 100%; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); color: white; padding: 16px; border-radius: 16px; font-size: 17px; outline: none; transition: 0.2s; }
+        .input-box:focus { border-color: var(--accent); }
+        
+        .color-picker { display: flex; gap: 14px; flex-wrap: wrap;}
+        .c-dot { width: 40px; height: 40px; border-radius: 50%; cursor: pointer; border: 3px solid transparent; transition: 0.2s; }
+        .c-dot.selected { border-color: white; transform: scale(1.15); box-shadow: 0 0 15px currentColor; }
+
+        .btn-primary { 
+            width: 100%; background: var(--accent); color: white; border: none; padding: 18px; border-radius: 16px; 
+            font-size: 17px; font-weight: 700; margin-top: 10px; cursor: pointer; transition: 0.2s; 
+        }
+        .btn-primary:active { transform: scale(0.97); }
+
+        /* ====== VLASTNÍ DIALOG (MÍSTO ALERTŮ) ====== */
+        .dialog {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.9);
+            background: rgba(30, 30, 34, 0.95); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 24px; width: 300px; padding: 24px; text-align: center;
+            opacity: 0; pointer-events: none; transition: 0.3s cubic-bezier(0.17, 0.89, 0.32, 1.28); z-index: 2000;
+        }
+        .dialog.active { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+        .dialog h3 { font-size: 20px; font-weight: 700; margin-bottom: 10px; }
+        .dialog p { font-size: 14px; color: var(--text-dim); margin-bottom: 24px; line-height: 1.4;}
+        .d-btns { display: flex; gap: 12px; }
+        .d-btn { flex: 1; padding: 12px; border-radius: 12px; font-size: 15px; font-weight: 600; border: none; cursor: pointer; }
+        .d-btn.cancel { background: rgba(255,255,255,0.1); color: white; }
+        .d-btn.confirm { background: var(--danger); color: white; }
+        .d-btn.ok { background: var(--accent); color: white; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="date" id="current-date">Načítání...</div>
+        <h1 id="header-title">Dnešek</h1>
+    </header>
+
+    <!-- ZOBRAZENÍ: DNEŠEK -->
+    <main id="view-today" class="view active">
+        <div class="habit-list" id="habits-container">
+            <!-- Dynamicky generováno z JS -->
+        </div>
+    </main>
+
+    <!-- ZOBRAZENÍ: STATISTIKY -->
+    <main id="view-stats" class="view">
+        <div class="stats-grid">
+            <div class="glass-panel stat-card">
+                <h2 id="stat-total">0</h2>
+                <p>Splněno</p>
+            </div>
+            <div class="glass-panel stat-card">
+                <h2 id="stat-perfect">0</h2>
+                <p>Top dny</p>
+            </div>
+        </div>
+
+        <div class="section-title">Konzistence <span class="section-subtitle">Poslední rok</span></div>
+        <div class="glass-panel heatmap-wrapper">
+            <div class="heatmap-scroll">
+                <div class="hm-days">
+                    <span>Po</span><span></span><span>St</span><span></span><span>Pá</span><span></span><span>Ne</span>
+                </div>
+                <div class="hm-core">
+                    <div class="hm-months" id="hm-months"></div>
+                    <div class="hm-grid" id="heatmap-grid"></div>
+                </div>
+            </div>
+            <div class="heatmap-legend">
+                <span>Méně</span>
+                <div class="legend-c" style="background: var(--hm-0);"></div>
+                <div class="legend-c" style="background: var(--hm-1);"></div>
+                <div class="legend-c" style="background: var(--hm-2);"></div>
+                <div class="legend-c" style="background: var(--hm-3);"></div>
+                <div class="legend-c" style="background: var(--hm-4);"></div>
+                <span>Více</span>
+            </div>
+        </div>
+
+        <div class="section-title">Aktivita <span class="section-subtitle">14 dnů</span></div>
+        <div class="glass-panel chart-wrapper">
+            <canvas id="activityChart"></canvas>
+        </div>
+    </main>
+
+    <!-- ZOBRAZENÍ: NASTAVENÍ -->
+    <main id="view-settings" class="view">
+        <div class="section-title" style="margin-top: 10px;">Správa návyků</div>
+        <div class="glass-panel" style="padding: 5px 0;">
+            <div id="settings-habit-list"></div>
+            <div style="padding: 0 20px;"><div style="height: 1px; background: rgba(255,255,255,0.05);"></div></div>
+            <button class="settings-btn" onclick="UI.openSheet()">
+                <div style="display:flex; align-items:center;">
+                    <div class="set-icon" style="background: rgba(10, 132, 255, 0.15); color: var(--accent);">➕</div>
+                    <span>Přidat nový návyk</span>
+                </div>
+            </button>
+        </div>
+
+        <div class="section-title">Záloha dat</div>
+        <div class="glass-panel" style="padding: 5px 0;">
+            <button class="settings-btn" onclick="Data.export()">
+                <div style="display:flex; align-items:center;">
+                    <div class="set-icon">📤</div><span>Uložit zálohu</span>
+                </div>
+            </button>
+            <div style="padding: 0 20px;"><div style="height: 1px; background: rgba(255,255,255,0.05);"></div></div>
+            <button class="settings-btn" onclick="document.getElementById('file-input').click()">
+                <div style="display:flex; align-items:center;">
+                    <div class="set-icon">📥</div><span>Načíst zálohu</span>
+                </div>
+            </button>
+            <input type="file" id="file-input" accept=".json" style="display: none;" onchange="Data.import(event)">
+        </div>
+
+        <div style="height: 24px;"></div>
+        <div class="glass-panel" style="padding: 5px 0;">
+            <button class="settings-btn" onclick="UI.showDialog('reset')" style="color: var(--danger);">
+                <div style="display:flex; align-items:center;">
+                    <div class="set-icon" style="background: rgba(255,69,58,0.15);">🗑</div>
+                    <span>Smazat všechna data</span>
+                </div>
+            </button>
+        </div>
+        <p style="text-align: center; color: var(--text-dim); font-size: 11px; margin-top: 20px;">HabitPro Max v1.1 - GitHub Edition</p>
+    </main>
+
+    <!-- DOLNÍ NAVIGACE -->
+    <nav>
+        <div class="nav-item active" onclick="UI.switchTab('today', this)">
+            <svg viewBox="0 0 24 24"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z"/></svg>
+            Dnešek
+        </div>
+        <div class="nav-item" onclick="UI.switchTab('stats', this)">
+            <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+            Statistiky
+        </div>
+        <div class="nav-item" onclick="UI.switchTab('settings', this)">
+            <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.73 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .43-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+            Nastavení
+        </div>
+    </nav>
+
+    <!-- FORMULÁŘ: PŘIDÁNÍ -->
+    <div class="overlay" id="overlay" onclick="UI.closeSheet()"></div>
+    <div class="bottom-sheet" id="bottom-sheet">
+        <div style="width: 48px; height: 5px; background: rgba(255,255,255,0.2); border-radius: 5px; margin: 0 auto 24px;"></div>
+        <h2 style="font-size: 24px; font-weight: 800; margin-bottom: 24px;">Nový návyk</h2>
+        
+        <div class="form-group">
+            <label>Ikona a Název</label>
+            <div class="input-row">
+                <input type="text" id="h-icon" class="input-box" style="width: 80px; text-align: center; font-size: 24px;" value="🎯">
+                <input type="text" id="h-name" class="input-box" placeholder="Např. Cvičení" autocomplete="off">
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Denní cíl (Počet splnění)</label>
+            <input type="number" id="h-goal" class="input-box" value="1" min="1">
+        </div>
+        <div class="form-group">
+            <label>Téma (Barva)</label>
+            <div class="color-picker">
+                <div class="c-dot selected" style="background: #0a84ff; color: #0a84ff;" onclick="UI.setColor(this, '#0a84ff')"></div>
+                <div class="c-dot" style="background: #32d74b; color: #32d74b;" onclick="UI.setColor(this, '#32d74b')"></div>
+                <div class="c-dot" style="background: #ff9f0a; color: #ff9f0a;" onclick="UI.setColor(this, '#ff9f0a')"></div>
+                <div class="c-dot" style="background: #ff453a; color: #ff453a;" onclick="UI.setColor(this, '#ff453a')"></div>
+                <div class="c-dot" style="background: #bf5af2; color: #bf5af2;" onclick="UI.setColor(this, '#bf5af2')"></div>
+                <div class="c-dot" style="background: #64d2ff; color: #64d2ff;" onclick="UI.setColor(this, '#64d2ff')"></div>
+                <div class="c-dot" style="background: #ffd60a; color: #ffd60a;" onclick="UI.setColor(this, '#ffd60a')"></div>
+            </div>
+        </div>
+        <button class="btn-primary" onclick="Habits.create()">Vytvořit návyk</button>
+    </div>
+
+    <!-- DIALOG (Custom Alert) -->
+    <div class="overlay" id="dialog-overlay"></div>
+    <div class="dialog" id="custom-dialog">
+        <h3 id="d-title">Title</h3>
+        <p id="d-msg">Message</p>
+        <div class="d-btns" id="d-btns-area">
+            <!-- Tlačítka se generují z JS -->
+        </div>
+    </div>
+
+    <!-- ===== JAVASCRIPT ===== -->
+    <script>
+        const AppState = {
+            data: { habits: [], history: {} },
+            activeColor: '#0a84ff',
+            chart: null,
+
+            init() {
+                try {
+                    let localData = localStorage.getItem('habitProFinal');
+                    if (localData) this.data = JSON.parse(localData);
+                } catch(e) { console.error("Data load error"); }
+            },
+
+            save() { localStorage.setItem('habitProFinal', JSON.stringify(this.data)); },
+
+            getTodayStr() {
+                let d = new Date();
+                return new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+            },
+
+            export() {
+                const blob = new Blob([JSON.stringify(this.data)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a"); a.href = url; a.download = "HabitPro_Zaloha.json"; a.click();
+            },
+
+            import(e) {
+                const file = e.target.files[0]; if(!file) return;
+                const reader = new FileReader();
+                reader.onload = ev => {
+                    try { 
+                        let parsed = JSON.parse(ev.target.result); 
+                        if(parsed.habits && parsed.history) { 
+                            this.data = parsed; this.save(); Habits.renderToday(); 
+                            UI.showDialog('info', 'Úspěch', 'Záloha byla načtena.');
+                        } else throw new Error();
+                    } catch { UI.showDialog('info', 'Chyba', 'Soubor je poškozený.'); }
+                };
+                reader.readAsText(file);
+            }
+        };
+
+        const Habits = {
+            renderToday() {
+                const container = document.getElementById('habits-container');
+                container.innerHTML = '';
+                const today = AppState.getTodayStr();
+                
+                if(!AppState.data.history[today]) AppState.data.history[today] = {};
+
+                if (AppState.data.habits.length === 0) {
+                    container.innerHTML = '<div style="text-align:center; padding-top: 80px; opacity: 0.6;"><div style="font-size: 60px; margin-bottom: 16px;">🌱</div><h3 style="font-size: 18px;">Žádné návyky</h3><p style="font-size: 14px;">Přidej si první v Nastavení.</p></div>';
+                    return;
+                }
+
+                AppState.data.habits.forEach((habit, index) => {
+                    const current = AppState.data.history[today][habit.id] || 0;
+                    const isDone = current >= habit.goal;
+                    const progress = Math.min((current / habit.goal) * 100, 100);
+                    const dashoffset = 144.5 - (144.5 * progress) / 100;
+                    
+                    let streak = 0; let cDate = new Date();
+                    for (let i = 0; i < 365; i++) {
+                        let dStr = new Date(cDate.getTime() - (cDate.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+                        if ((AppState.data.history[dStr] && AppState.data.history[dStr][habit.id] >= habit.goal)) streak++;
+                        else if (i > 0) break;
+                        cDate.setDate(cDate.getDate() - 1);
+                    }
+
+                    const card = document.createElement('div');
+                    card.className = 'glass-panel habit-card';
+                    card.style.animationDelay = (index * 0.05) + 's';
+                    card.onclick = () => this.tap(habit.id);
+                    
+                    // Bezpečné složení HTML (bez generátorových pastí)
+                    let html = '<div class="habit-info">';
+                    html += '<div class="habit-icon" style="color:' + habit.color + ';">' + habit.icon + '</div>';
+                    html += '<div class="habit-texts"><h3>' + habit.name + '</h3>';
+                    html += '<p>' + current + ' / ' + habit.goal;
+                    if(streak > 2) html += ' <span class="streak-badge">🔥 ' + streak + ' d.</span>';
+                    html += '</p></div></div>';
+                    
+                    html += '<div class="progress-ring"><svg><circle class="bg" cx="26" cy="26" r="23"></circle>';
+                    html += '<circle class="fg" cx="26" cy="26" r="23" style="stroke:' + (isDone ? 'var(--success)' : habit.color) + '; stroke-dasharray: 144.5; stroke-dashoffset:' + dashoffset + ';"></circle></svg>';
+                    html += '<div class="progress-icon" style="transform: translate(-50%, -50%) scale(' + (isDone?1:0) + ');">' + (isDone?'✓':'') + '</div></div>';
+                    
+                    card.innerHTML = html;
+                    container.appendChild(card);
+                });
+            },
+
+            tap(id) {
+                const today = AppState.getTodayStr();
+                const habit = AppState.data.habits.find(h => h.id === id);
+                let current = AppState.data.history[today][id] || 0;
+                
+                if (current < habit.goal) { 
+                    AppState.data.history[today][id]++; 
+                    if(navigator.vibrate) navigator.vibrate(40); 
+                } else { 
+                    AppState.data.history[today][id] = 0; 
+                    if(navigator.vibrate) navigator.vibrate([30,40,30]); 
+                }
+                AppState.save(); this.renderToday();
+            },
+
+            create() {
+                const name = document.getElementById('h-name').value.trim();
+                const icon = document.getElementById('h-icon').value.trim() || '🎯';
+                const goal = parseInt(document.getElementById('h-goal').value) || 1;
+                
+                if(!name) return UI.showDialog('info', 'Chyba', 'Název nesmí být prázdný.');
+                
+                AppState.data.habits.push({ id: 'h'+Date.now(), name: name, icon: icon, color: AppState.activeColor, goal: goal });
+                AppState.save(); document.getElementById('h-name').value = ''; 
+                UI.closeSheet(); UI.switchTab('today', document.querySelectorAll('.nav-item')[0]);
+            }
+        };
+
+        const Stats = {
+            renderAll() {
+                let tDone = 0; let pDays = 0; const hCount = AppState.data.habits.length;
+                Object.values(AppState.data.history).forEach(day => {
+                    let dDone = 0;
+                    AppState.data.habits.forEach(h => { if(day[h.id] >= h.goal) { tDone++; dDone++; } });
+                    if(hCount > 0 && dDone === hCount) pDays++;
+                });
+                document.getElementById('stat-total').innerText = tDone;
+                document.getElementById('stat-perfect').innerText = pDays;
+
+                this.renderChart();
+                this.renderHeatmap();
+            },
+
+            renderChart() {
+                if(typeof Chart === 'undefined') return; // Ochrana proti pádu
+                const ctx = document.getElementById('activityChart').getContext('2d');
+                if(AppState.chart) AppState.chart.destroy();
+
+                let labels = []; let dataArr = []; let today = new Date();
+                for(let i=13; i>=0; i--) {
+                    let d = new Date(today.getTime()); d.setDate(d.getDate() - i);
+                    let dStr = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+                    labels.push(d.toLocaleDateString('cs-CZ', {day:'numeric', month:'numeric'}));
+                    
+                    let count = 0;
+                    if(AppState.data.history[dStr]) {
+                        AppState.data.habits.forEach(h => { if(AppState.data.history[dStr][h.id] >= h.goal) count++; });
+                    }
+                    dataArr.push(count);
+                }
+
+                Chart.defaults.color = '#9ca3af';
+                let grad = ctx.createLinearGradient(0, 0, 0, 260);
+                grad.addColorStop(0, '#8a64ed'); grad.addColorStop(1, '#0a84ff');
+
+                AppState.chart = new Chart(ctx, {
+                    type: 'bar',
+                    data: { labels: labels, datasets: [{ data: dataArr, backgroundColor: grad, borderRadius: 6 }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { stepSize: 1 }, beginAtZero: true } } }
+                });
+            },
+
+            renderHeatmap() {
+                const grid = document.getElementById('heatmap-grid');
+                const mContainer = document.getElementById('hm-months');
+                grid.innerHTML = ''; mContainer.innerHTML = '';
+                
+                let days = []; let today = new Date();
+                let sDate = new Date(today.getTime()); sDate.setDate(today.getDate() - 364);
+                while(sDate.getDay() !== 1) sDate.setDate(sDate.getDate() - 1);
+
+                let cMonth = -1; let colIdx = 0;
+                while (sDate <= today) {
+                    days.push(new Date(sDate.getTime()));
+                    if (sDate.getDay() === 1) { 
+                        if (sDate.getMonth() !== cMonth) {
+                            cMonth = sDate.getMonth();
+                            mContainer.innerHTML += '<span style="left:' + (colIdx * 18) + 'px">' + sDate.toLocaleDateString('cs-CZ', {month:'short'}) + '</span>';
+                        }
+                        colIdx++;
+                    }
+                    sDate.setDate(sDate.getDate() + 1);
+                }
+                
+                days.forEach(d => {
+                    let dStr = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+                    let done = 0; let total = AppState.data.habits.length;
+                    if(AppState.data.history[dStr]) AppState.data.habits.forEach(h => { if(AppState.data.history[dStr][h.id] >= h.goal) done++; });
+                    
+                    let lClass = '';
+                    if(total > 0 && done > 0) {
+                        let pct = done / total;
+                        if(pct === 1) lClass = 'l4'; else if(pct >= 0.66) lClass = 'l3'; else if(pct >= 0.33) lClass = 'l2'; else lClass = 'l1';
+                    }
+                    grid.innerHTML += '<div class="hm-cell ' + lClass + '"></div>';
+                });
+
+                setTimeout(() => { const c = document.querySelector('.heatmap-wrapper'); c.scrollLeft = c.scrollWidth; }, 50);
+            }
+        };
+
+        const UI = {
+            switchTab(tab, el) {
+                document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+                document.getElementById('view-' + tab).classList.add('active');
+                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                el.classList.add('active');
+                
+                const titles = { 'today': 'Dnešek', 'stats': 'Statistiky', 'settings': 'Nastavení' };
+                document.getElementById('header-title').innerText = titles[tab];
+                
+                if(tab === 'today') Habits.renderToday();
+                if(tab === 'stats') setTimeout(() => Stats.renderAll(), 10);
+                if(tab === 'settings') this.renderSettings();
+            },
+
+            renderSettings() {
+                const list = document.getElementById('settings-habit-list');
+                list.innerHTML = '';
+                AppState.data.habits.forEach(h => {
+                    let html = '<div class="settings-btn" style="cursor:default;">';
+                    html += '<div style="display:flex; align-items:center;"><div class="set-icon" style="background:'+h.color+'20; color:'+h.color+';">'+h.icon+'</div><span>'+h.name+'</span></div>';
+                    html += '<button onclick="UI.showDialog(\'delete\',\''+h.id+'\')" style="background:none; border:none; color:var(--danger); font-size:22px; cursor:pointer; padding:5px;">🗑</button></div>';
+                    list.innerHTML += html;
+                });
+            },
+
+            openSheet() { document.getElementById('overlay').classList.add('active'); document.getElementById('bottom-sheet').classList.add('active'); },
+            closeSheet() { document.getElementById('overlay').classList.remove('active'); document.getElementById('bottom-sheet').classList.remove('active'); },
+            setColor(el, color) { document.querySelectorAll('.c-dot').forEach(d => d.classList.remove('selected')); el.classList.add('selected'); AppState.activeColor = color; },
+
+            showDialog(type, arg1, arg2) {
+                const overlay = document.getElementById('dialog-overlay');
+                const dialog = document.getElementById('custom-dialog');
+                const t = document.getElementById('d-title');
+                const m = document.getElementById('d-msg');
+                const btns = document.getElementById('d-btns-area');
+
+                if (type === 'delete') {
+                    let habit = AppState.data.habits.find(h => h.id === arg1);
+                    t.innerText = 'Smazat návyk?'; m.innerHTML = 'Opravdu smazat <strong>' + habit.name + '</strong>?';
+                    btns.innerHTML = '<button class="d-btn cancel" onclick="UI.closeDialog()">Zrušit</button><button class="d-btn confirm" id="confirm-del">Smazat</button>';
+                    document.getElementById('confirm-del').onclick = () => { AppState.data.habits = AppState.data.habits.filter(h => h.id !== arg1); AppState.save(); UI.closeDialog(); UI.renderSettings(); };
+                } else if (type === 'reset') {
+                    t.innerText = 'Smazat data?'; m.innerHTML = 'Tato akce je nevratná!';
+                    btns.innerHTML = '<button class="d-btn cancel" onclick="UI.closeDialog()">Zrušit</button><button class="d-btn confirm" id="confirm-res">Smazat vše</button>';
+                    document.getElementById('confirm-res').onclick = () => { localStorage.removeItem('habitProFinal'); location.reload(); };
+                } else if (type === 'info') {
+                    t.innerText = arg1; m.innerHTML = arg2;
+                    btns.innerHTML = '<button class="d-btn ok" onclick="UI.closeDialog()" style="width:100%;">OK</button>';
+                }
+                overlay.classList.add('active'); dialog.classList.add('active');
+            },
+
+            closeDialog() { document.getElementById('dialog-overlay').classList.remove('active'); document.getElementById('custom-dialog').classList.remove('active'); }
+        };
+
+        // START APLIKACE
+        document.addEventListener('DOMContentLoaded', () => {
+            const dateOpts = { weekday: 'long', day: 'numeric', month: 'long' };
+            document.getElementById('current-date').innerText = new Date().toLocaleDateString('cs-CZ', dateOpts);
+            
+            AppState.init();
+            Habits.renderToday();
+            
+            // Fix iOS scrollování
+            document.body.addEventListener('touchmove', function(e) {
+                if (!e.target.closest('main') && !e.target.closest('.heatmap-wrapper')) e.preventDefault();
+            }, { passive: false });
+        });
+    </script>
+</body>
+</html>
